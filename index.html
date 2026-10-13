@@ -6,13 +6,7 @@
     body { margin: 0; overflow: hidden; background: transparent; }
 
     #canvas { position: absolute; top: 0; left: 0; }
-
-    #fx { 
-        position: absolute; 
-        width: 1080px; 
-        height: 1920px; 
-        pointer-events: none; 
-    }
+    #fx { position: absolute; width: 100%; height: 100%; pointer-events: none; }
 
     .big-profile {
         position: absolute;
@@ -60,20 +54,23 @@
 <audio id="giftSound" src="gift.mp3"></audio>
 
 <script>
+/* CANVAS FIX – NU SE DEFORMEAZĂ NICIODATĂ */
+function resize() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+}
 const canvas = document.getElementById("canvas");
 const ctx = canvas.getContext("2d");
-
-/* CANVAS FIX 1080x1920 — NU SE MAI DEFORMEAZĂ */
-function resize() {
-    canvas.width = 1080;
-    canvas.height = 1920;
-}
 resize();
+window.onresize = resize;
 
+/* LISTE */
 let objects = [];
 let floatingUsers = new Set();
+let activeUsers = new Set();   // 🔥 lista reală de useri activi
 let profileCache = {};
 
+/* ÎNCĂRCARE POZE */
 function loadProfile(url, callback) {
     if (!url) return;
     if (profileCache[url]) return callback(profileCache[url]);
@@ -87,6 +84,7 @@ function loadProfile(url, callback) {
     img.src = url;
 }
 
+/* SPAWN AVATAR */
 function spawnFloatingAvatar(url, uid) {
     if (!url || !uid) return;
     if (floatingUsers.has(uid)) return;
@@ -100,18 +98,16 @@ function spawnFloatingAvatar(url, uid) {
             uid: uid,
             img: img,
             neon: neonColor,
-
-            x: Math.random() * 1080,
-            y: Math.random() * 1920,
-
+            x: Math.random() * canvas.width,
+            y: Math.random() * canvas.height,
             vx: (Math.random() * 2 - 1),
             vy: (Math.random() * 2 - 1),
-
             size: 120
         });
     });
 }
 
+/* DESEN AVATAR ROTUND */
 function drawCircleImage(ctx, img, x, y, size, neonColor) {
     ctx.save();
 
@@ -129,6 +125,7 @@ function drawCircleImage(ctx, img, x, y, size, neonColor) {
     ctx.restore();
 }
 
+/* RESPINGERE */
 function repelAvatars() {
     for (let i = 0; i < objects.length; i++) {
         for (let j = i + 1; j < objects.length; j++) {
@@ -153,15 +150,17 @@ function repelAvatars() {
     }
 }
 
+/* MARGINI */
 function fixEdges(o) {
     const r = o.size / 2;
 
     if (o.x < r) { o.x = r; o.vx *= -1; }
-    if (o.x > 1080 - r) { o.x = 1080 - r; o.vx *= -1; }
+    if (o.x > canvas.width - r) { o.x = canvas.width - r; o.vx *= -1; }
     if (o.y < r) { o.y = r; o.vy *= -1; }
-    if (o.y > 1920 - r) { o.y = 1920 - r; o.vy *= -1; }
+    if (o.y > canvas.height - r) { o.y = canvas.height - r; o.vy *= -1; }
 }
 
+/* LOOP FPS 30 */
 let lastFrame = 0;
 const fpsInterval = 1000 / 30;
 
@@ -172,7 +171,7 @@ function loop(ts) {
     }
     lastFrame = ts;
 
-    ctx.clearRect(0, 0, 1080, 1920);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
 
     repelAvatars();
 
@@ -191,23 +190,23 @@ function loop(ts) {
 }
 requestAnimationFrame(loop);
 
+/* POZA PROFIL */
 function getProfileUrl(data) {
     return data.profilePictureUrl ||
            data.userDetails?.profilePictureUrls?.[0] ||
            null;
 }
 
+/* PĂTRAT MARE */
 function spawnBigProfile(url, username) {
     if (!url) return;
 
     const fx = document.getElementById("fx");
 
     const wrapper = document.createElement("div");
-
     wrapper.style.position = "absolute";
-    wrapper.style.left = (1080/2 - 350) + "px";
-    wrapper.style.top = (1920/2 - 350) + "px";
-
+    wrapper.style.left = (canvas.width/2 - 350) + "px";
+    wrapper.style.top = (canvas.height/2 - 350) + "px";
     wrapper.style.width = "700px";
     wrapper.style.height = "700px";
     wrapper.style.pointerEvents = "none";
@@ -236,11 +235,10 @@ function spawnBigProfile(url, username) {
         }
     }, 10);
 
-    setTimeout(() => {
-        wrapper.remove();
-    }, 5000);
+    setTimeout(() => wrapper.remove(), 5000);
 }
 
+/* WEBSOCKET */
 const ws = new WebSocket("ws://localhost:62024");
 
 ws.onmessage = (event) => {
@@ -254,45 +252,56 @@ ws.onmessage = (event) => {
 
     if (!uid) return;
 
-    /* DOAR USERII ACTIVI — status = 1 */
-    if (packet.event === "roomUserSeq") {
-        const users = packet.data?.users || [];
-
-        const activeUIDs = new Set(
-            users
-                .filter(u => u.status === 1)
-                .map(u => u.secUid || u.userId || u.uniqueId)
-        );
-
-        objects = objects.filter(o => activeUIDs.has(o.uid));
-
-        floatingUsers.clear();
-        for (const uid of activeUIDs) floatingUsers.add(uid);
-
-        for (const u of users) {
-            if (u.status !== 1) continue;
-            const uid = u.secUid || u.userId || u.uniqueId;
-            const url = getProfileUrl(u);
-            spawnFloatingAvatar(url, uid);
-        }
-        return;
-    }
-
+    /* 🔥 USER INTRĂ */
     if (packet.event === "member") {
+        activeUsers.add(uid);
+
         document.getElementById("joinSound").play();
         spawnBigProfile(profileUrl, username);
         spawnFloatingAvatar(profileUrl, uid);
         return;
     }
 
-    if (packet.event === "gift") {
-        document.getElementById("giftSound").play();
-        spawnBigProfile(profileUrl, username);
+    /* 🔥 USER IESE (dacă TikTok trimite) */
+    if (packet.event === "leave") {
+        activeUsers.delete(uid);
+
+        objects = objects.filter(o => o.uid !== uid);
+        floatingUsers.delete(uid);
+        return;
+    }
+
+    /* 🔥 REFRESH – folosim DOAR activeUsers */
+    if (packet.event === "roomUserSeq") {
+        objects = objects.filter(o => activeUsers.has(o.uid));
+
+        floatingUsers.clear();
+        for (const uid of activeUsers) floatingUsers.add(uid);
+
+        const users = packet.data?.users || [];
+        for (const u of users) {
+            const uid = u.secUid || u.userId || u.uniqueId;
+            if (!activeUsers.has(uid)) continue;
+
+            const url = getProfileUrl(u);
+            spawnFloatingAvatar(url, uid);
+        }
+        return;
+    }
+
+    /* LIKE / CHAT */
+    if (packet.event === "like" || packet.event === "chat") {
+        if (!activeUsers.has(uid)) return;
         spawnFloatingAvatar(profileUrl, uid);
         return;
     }
 
-    if (packet.event === "like" || packet.event === "chat") {
+    /* GIFT */
+    if (packet.event === "gift") {
+        activeUsers.add(uid);
+
+        document.getElementById("giftSound").play();
+        spawnBigProfile(profileUrl, username);
         spawnFloatingAvatar(profileUrl, uid);
         return;
     }
