@@ -6,7 +6,7 @@
     body { margin: 0; overflow: hidden; background: transparent; }
 
     #canvas { position: absolute; top: 0; left: 0; }
-    #fx { position: absolute; width: 100%; height: 100%; pointer-events: none; }
+    #fx { position: absolute; width: 1080px; height: 1920px; pointer-events: none; }
 
     .big-profile {
         position: absolute;
@@ -54,21 +54,39 @@
 <audio id="giftSound" src="gift.mp3"></audio>
 
 <script>
-/* CANVAS FIX – NU SE DEFORMEAZĂ NICIODATĂ */
-function resize() {
-    canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight;
-}
+/* CANVAS FIX 1080×1920 */
 const canvas = document.getElementById("canvas");
 const ctx = canvas.getContext("2d");
+
+function resize() {
+    canvas.width = 1080;
+    canvas.height = 1920;
+}
 resize();
-window.onresize = resize;
 
 /* LISTE */
 let objects = [];
 let floatingUsers = new Set();
-let activeUsers = new Set();   // 🔥 lista reală de useri activi
+let activeUsers = new Map();   // uid → timestamp ultima activitate
 let profileCache = {};
+
+const ACTIVE_TIMEOUT = 60000; // 🔥 60 secunde fără activitate = dispare
+
+function markActivity(uid) {
+    activeUsers.set(uid, Date.now());
+}
+
+function cleanupInactive() {
+    const now = Date.now();
+    for (const [uid, last] of activeUsers.entries()) {
+        if (now - last > ACTIVE_TIMEOUT) {
+            activeUsers.delete(uid);
+            floatingUsers.delete(uid);
+            objects = objects.filter(o => o.uid !== uid);
+        }
+    }
+}
+setInterval(cleanupInactive, 2000);
 
 /* ÎNCĂRCARE POZE */
 function loadProfile(url, callback) {
@@ -87,6 +105,9 @@ function loadProfile(url, callback) {
 /* SPAWN AVATAR */
 function spawnFloatingAvatar(url, uid) {
     if (!url || !uid) return;
+
+    markActivity(uid);
+
     if (floatingUsers.has(uid)) return;
 
     floatingUsers.add(uid);
@@ -98,8 +119,8 @@ function spawnFloatingAvatar(url, uid) {
             uid: uid,
             img: img,
             neon: neonColor,
-            x: Math.random() * canvas.width,
-            y: Math.random() * canvas.height,
+            x: Math.random() * 1080,
+            y: Math.random() * 1920,
             vx: (Math.random() * 2 - 1),
             vy: (Math.random() * 2 - 1),
             size: 120
@@ -155,9 +176,9 @@ function fixEdges(o) {
     const r = o.size / 2;
 
     if (o.x < r) { o.x = r; o.vx *= -1; }
-    if (o.x > canvas.width - r) { o.x = canvas.width - r; o.vx *= -1; }
+    if (o.x > 1080 - r) { o.x = 1080 - r; o.vx *= -1; }
     if (o.y < r) { o.y = r; o.vy *= -1; }
-    if (o.y > canvas.height - r) { o.y = canvas.height - r; o.vy *= -1; }
+    if (o.y > 1920 - r) { o.y = 1920 - r; o.vy *= -1; }
 }
 
 /* LOOP FPS 30 */
@@ -171,7 +192,7 @@ function loop(ts) {
     }
     lastFrame = ts;
 
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.clearRect(0, 0, 1080, 1920);
 
     repelAvatars();
 
@@ -205,8 +226,8 @@ function spawnBigProfile(url, username) {
 
     const wrapper = document.createElement("div");
     wrapper.style.position = "absolute";
-    wrapper.style.left = (canvas.width/2 - 350) + "px";
-    wrapper.style.top = (canvas.height/2 - 350) + "px";
+    wrapper.style.left = (1080/2 - 350) + "px";
+    wrapper.style.top = (1920/2 - 350) + "px";
     wrapper.style.width = "700px";
     wrapper.style.height = "700px";
     wrapper.style.pointerEvents = "none";
@@ -252,59 +273,39 @@ ws.onmessage = (event) => {
 
     if (!uid) return;
 
-    /* 🔥 USER INTRĂ */
+    /* JOIN */
     if (packet.event === "member") {
-        activeUsers.add(uid);
-
+        markActivity(uid);
         document.getElementById("joinSound").play();
         spawnBigProfile(profileUrl, username);
         spawnFloatingAvatar(profileUrl, uid);
         return;
     }
 
-    /* 🔥 USER IESE (dacă TikTok trimite) */
-    if (packet.event === "leave") {
-        activeUsers.delete(uid);
-
-        objects = objects.filter(o => o.uid !== uid);
-        floatingUsers.delete(uid);
-        return;
-    }
-
-    /* 🔥 REFRESH – folosim DOAR activeUsers */
-    if (packet.event === "roomUserSeq") {
-        objects = objects.filter(o => activeUsers.has(o.uid));
-
-        floatingUsers.clear();
-        for (const uid of activeUsers) floatingUsers.add(uid);
-
-        const users = packet.data?.users || [];
-        for (const u of users) {
-            const uid = u.secUid || u.userId || u.uniqueId;
-            if (!activeUsers.has(uid)) continue;
-
-            const url = getProfileUrl(u);
-            spawnFloatingAvatar(url, uid);
-        }
-        return;
-    }
-
-    /* LIKE / CHAT */
-    if (packet.event === "like" || packet.event === "chat") {
-        if (!activeUsers.has(uid)) return;
-        spawnFloatingAvatar(profileUrl, uid);
-        return;
-    }
-
     /* GIFT */
     if (packet.event === "gift") {
-        activeUsers.add(uid);
-
+        markActivity(uid);
         document.getElementById("giftSound").play();
         spawnBigProfile(profileUrl, username);
         spawnFloatingAvatar(profileUrl, uid);
         return;
     }
+
+    /* CHAT */
+    if (packet.event === "chat") {
+        markActivity(uid);
+        spawnFloatingAvatar(profileUrl, uid);
+        return;
+    }
+
+    /* LIKE */
+    if (packet.event === "like") {
+        markActivity(uid);
+        spawnFloatingAvatar(profileUrl, uid);
+        return;
+    }
+
+    /* roomUserSeq — ignorăm complet lista TikTok */
 };
 </script>
 
