@@ -67,7 +67,8 @@ let floatingUsers = new Set();
 let activeUsers = new Map();   // uid → timestamp ultima activitate
 let profileCache = {};
 
-const ACTIVE_TIMEOUT = 60000; // 🔥 60 secunde fără activitate = dispare
+const ACTIVE_TIMEOUT = 300000; // 🔥 5 minute
+
 
 function markActivity(uid) {
     activeUsers.set(uid, Date.now());
