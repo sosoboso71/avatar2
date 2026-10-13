@@ -54,15 +54,12 @@
 <audio id="giftSound" src="gift.mp3"></audio>
 
 <script>
-/* CANVAS FIX 1080×1920 */
+/* CANVAS FIX — EXACT CA ÎNAINTE */
 const canvas = document.getElementById("canvas");
 const ctx = canvas.getContext("2d");
 
-function resize() {
-    canvas.width = 1080;
-    canvas.height = 1920;
-}
-resize();
+canvas.width = 1080;
+canvas.height = 1920;
 
 /* LISTE */
 let objects = [];
@@ -218,7 +215,7 @@ function getProfileUrl(data) {
            null;
 }
 
-/* PĂTRAT MARE */
+/* ZOOM MARE — CENTRAT PERFECT */
 function spawnBigProfile(url, username) {
     if (!url) return;
 
@@ -304,8 +301,6 @@ ws.onmessage = (event) => {
         spawnFloatingAvatar(profileUrl, uid);
         return;
     }
-
-    /* roomUserSeq — ignorăm complet lista TikTok */
 };
 </script>
 
